@@ -1,0 +1,36 @@
+{
+    "type": "panel",
+    "i18n": false,
+    "items": {
+        "address": {
+            "type": "text",
+            "label": "Bluetooth MAC address",
+            "newLine": true,
+            "validator": "/^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/.test(data.address)"
+        },
+        "hci": { "type": "text", "label": "Dedicated USB Bluetooth controller (hci0/hci1)", "newLine": true },
+        "pollInterval": {
+            "type": "number",
+            "label": "Polling interval (seconds)",
+            "min": 5,
+            "max": 3600,
+            "newLine": true
+        },
+        "responseTimeout": {
+            "type": "number",
+            "label": "Response timeout (milliseconds)",
+            "min": 1000,
+            "max": 10000,
+            "newLine": true
+        },
+        "maxTemperature": {
+            "type": "select",
+            "label": "Maximum target temperature",
+            "options": [
+                { "value": 25, "label": "25 °C (default)" },
+                { "value": 30, "label": "30 °C (verify device support)" }
+            ],
+            "newLine": true
+        }
+    }
+}

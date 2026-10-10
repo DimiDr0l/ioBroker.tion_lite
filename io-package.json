@@ -1,0 +1,99 @@
+{
+    "common": {
+        "name": "tion_lite",
+        "version": "0.0.2",
+        "news": {
+            "0.0.2": {
+                "en": "Use direct USB Bluetooth HCI access in Linux containers",
+                "ru": "Прямой доступ к USB Bluetooth через HCI в Linux-контейнере"
+            },
+            "0.0.1": {
+                "en": "initial release",
+                "de": "Erstveröffentlichung",
+                "ru": "Начальная версия",
+                "pt": "lançamento inicial",
+                "nl": "Eerste uitgave",
+                "fr": "Première version",
+                "it": "Versione iniziale",
+                "es": "Versión inicial",
+                "pl": "Pierwsze wydanie",
+                "uk": "Початкова версія",
+                "zh-cn": "首次出版"
+            }
+        },
+        "titleLang": {
+            "en": "Tion Lite",
+            "de": "Tion Lite",
+            "ru": "Tion Lite",
+            "pt": "Tion Lite",
+            "nl": "Tion Lite",
+            "fr": "Tion Lite",
+            "it": "Tion Lite",
+            "es": "Tion Lite",
+            "pl": "Tion Lite",
+            "uk": "Tion Lite",
+            "zh-cn": "Tion Lite"
+        },
+        "desc": {
+            "en": "Tion Lite controller",
+            "de": "Tion Lite-Controller",
+            "ru": "Контроллер Тион Лайт",
+            "pt": "Controlador Tion Lite",
+            "nl": "Tion Lite-controller",
+            "fr": "Contrôleur Tion Lite",
+            "it": "Controller Tion Lite",
+            "es": "Controlador Tion Lite",
+            "pl": "Kontroler Tion Lite",
+            "uk": "Контролер Tion Lite",
+            "zh-cn": "Tion Lite 控制器"
+        },
+        "authors": [
+            "DimiDr0l <dimidr@gmail.com>"
+        ],
+        "keywords": [
+            "tion",
+            "lite"
+        ],
+        "licenseInformation": {
+            "type": "free",
+            "license": "MIT"
+        },
+        "platform": "Javascript/Node.js",
+        "icon": "tion_lite.png",
+        "enabled": true,
+        "extIcon": "https://raw.githubusercontent.com/DimiDr0l/ioBroker.tion_lite/main/admin/tion_lite.png",
+        "readme": "https://github.com/DimiDr0l/ioBroker.tion_lite/blob/main/README.md",
+        "loglevel": "info",
+        "tier": 3,
+        "mode": "daemon",
+        "type": "climate-control",
+        "compact": false,
+        "connectionType": "local",
+        "dataSource": "poll",
+        "adminUI": {
+            "config": "json"
+        },
+        "dependencies": [
+            {
+                "js-controller": ">=6.0.11"
+            }
+        ],
+        "globalDependencies": [
+            {
+                "admin": ">=7.0.23"
+            }
+        ],
+        "os": [
+            "linux"
+        ]
+    },
+    "native": {
+        "address": "",
+        "hci": "hci0",
+        "pollInterval": 5,
+        "responseTimeout": 3000,
+        "maxTemperature": 25
+    },
+    "objects": [],
+    "instanceObjects": []
+}
