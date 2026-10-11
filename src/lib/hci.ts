@@ -4,10 +4,36 @@ import { UUIDS } from "./protocol";
 
 const uuid = (value: string): string => value.replace(/-/g, "").toLowerCase();
 
-/** Direct Linux HCI access to a dedicated USB Bluetooth controller. */
+/**
+ * Load Noble like ioBroker.ble: select HCI before loading, accept singleton or factory exports.
+ *
+ * @param deviceId Numeric HCI controller index.
+ * @param importer Deferred module loader; replaceable in tests without native hardware.
+ */
+export async function loadNoble(
+    deviceId: number,
+    importer: () => Promise<unknown> = () => import("@stoprocent/noble"),
+): Promise<Noble> {
+    process.env.NOBLE_HCI_DEVICE_ID = String(deviceId);
+    process.env.NOBLE_BINDINGS = "hci";
+    delete process.env.HCI_CHANNEL_USER;
+    const module = await importer();
+    const exported = module && typeof module === "object" && "default" in module ? module.default : module;
+    const noble =
+        typeof exported === "function"
+            ? (exported as (options: { extended: boolean }) => Noble)({ extended: false })
+            : exported;
+    if (!noble || typeof (noble as Noble).on !== "function") {
+        throw new Error("Unable to load @stoprocent/noble: expected a Noble instance or factory");
+    }
+    return noble as Noble;
+}
+
+/** Linux HCI RAW access. Used only inside the isolated Bluetooth worker. */
 export class HciTransport implements Transport {
     public onData: (data: Buffer) => void = () => {};
     public onDisconnect: (reason: Error) => void = () => {};
+    public onDriverState: (state: string) => void = () => {};
     private noble?: Noble;
     private peripheral?: Peripheral;
     private writer?: Characteristic;
@@ -17,7 +43,7 @@ export class HciTransport implements Transport {
     private scanning = false;
 
     /**
-     * Configure one native HCI user-channel backend, separate from BlueZ.
+     * Configure the standard Noble HCI backend, as used by ioBroker.ble.
      *
      * @param address Uppercase colon-separated breezer MAC address.
      * @param hci Dedicated controller name, such as hci1.
@@ -27,10 +53,7 @@ export class HciTransport implements Transport {
     public constructor(
         private readonly address: string,
         private readonly hci: string,
-        private readonly createNoble: (deviceId: number) => Promise<Noble> = async deviceId => {
-            const { withBindings } = await import("@stoprocent/noble");
-            return withBindings("hci", { hciDriver: "native", deviceId, userChannel: true });
-        },
+        private readonly createNoble: (deviceId: number) => Promise<Noble> = loadNoble,
         private readonly operationTimeout = 20000,
     ) {}
 
@@ -41,6 +64,7 @@ export class HciTransport implements Transport {
     };
 
     private readonly handleState = (state: string): void => {
+        this.onDriverState(state);
         if (this.connected && state !== "poweredOn") {
             this.handleError(new Error(`Bluetooth controller became ${state}`));
         }
@@ -82,13 +106,14 @@ export class HciTransport implements Transport {
     private async waitForController(noble: Noble): Promise<void> {
         // Read the state before adding a stateChange listener: the getter initializes
         // HCI synchronously, so native load/bind exceptions remain catchable here.
+        this.onDriverState(noble.state);
         if (noble.state === "poweredOn") {
             return;
         }
         const check = (state: string): void => {
             if (["unsupported", "unauthorized"].includes(state)) {
                 throw new Error(
-                    `${this.hci} is ${state}; check HCI access permissions and that the dedicated controller is down`,
+                    `${this.hci} is ${state}; check HCI access permissions and that the selected controller is powered on`,
                 );
             }
         };
@@ -96,6 +121,7 @@ export class HciTransport implements Transport {
         let listener = (_state: string): void => {};
         const ready = new Promise<void>((resolve, reject) => {
             listener = state => {
+                this.onDriverState(state);
                 try {
                     check(state);
                     if (state === "poweredOn") {
@@ -143,7 +169,7 @@ export class HciTransport implements Transport {
     /** Scan for the configured MAC, connect, resolve GATT and enable notifications. */
     public async connect(): Promise<{ name: string; address: string }> {
         if (process.platform !== "linux") {
-            throw new Error("Direct HCI transport requires Linux");
+            throw new Error("Noble HCI transport requires Linux");
         }
         if (!/^hci\d+$/.test(this.hci)) {
             throw new Error("Expected an HCI controller name such as hci0");
@@ -201,7 +227,7 @@ export class HciTransport implements Transport {
         await this.bounded(() => this.writer!.writeAsync(frame, !withResponse));
     }
 
-    /** Release listeners, connections and the exclusive HCI socket. */
+    /** Release listeners, connections and the HCI RAW socket. */
     public close(): void {
         if (this.abort.signal.aborted) {
             return;

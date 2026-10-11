@@ -85,7 +85,7 @@ async function withTransport(test: (transport: HciTransport, noble: FakeNoble) =
     }
 }
 
-describe("Direct USB-controller HCI transport", () => {
+describe("Noble HCI RAW transport", () => {
     it("matches the MAC, scopes GATT, subscribes and uses correct ATT write types", async () => {
         await withTransport(async (transport, noble) => {
             expect(await transport.connect()).to.deep.equal({ name: "Br Lite USB", address: "AA:BB:CC:DD:EE:FF" });

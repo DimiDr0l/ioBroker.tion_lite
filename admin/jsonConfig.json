@@ -8,7 +8,11 @@
             "newLine": true,
             "validator": "/^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/.test(data.address)"
         },
-        "hci": { "type": "text", "label": "Dedicated USB Bluetooth controller (hci0/hci1)", "newLine": true },
+        "hci": {
+            "type": "text",
+            "label": "Bluetooth HCI controller (hci0/hci1, powered on)",
+            "newLine": true
+        },
         "pollInterval": {
             "type": "number",
             "label": "Polling interval (seconds)",
@@ -27,8 +31,14 @@
             "type": "select",
             "label": "Maximum target temperature",
             "options": [
-                { "value": 25, "label": "25 °C (default)" },
-                { "value": 30, "label": "30 °C (verify device support)" }
+                {
+                    "value": 25,
+                    "label": "25 \u00b0C (default)"
+                },
+                {
+                    "value": 30,
+                    "label": "30 \u00b0C (verify device support)"
+                }
             ],
             "newLine": true
         }

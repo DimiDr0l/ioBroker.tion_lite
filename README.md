@@ -2,7 +2,8 @@
 # ioBroker.tion_lite
 
 BLE-драйвер Tion BR_LITE для ioBroker на Linux. Один бризер на экземпляр адаптера.
-Реализован на TypeScript, использует USB Bluetooth-контроллер через прямой native HCI backend Noble.
+Реализован на TypeScript. Bluetooth работает через `@stoprocent/noble` в отдельном
+дочернем процессе — по подходу адаптера ioBroker.ble.
 
 ## Возможности
 
@@ -17,85 +18,86 @@ BLE-драйвер Tion BR_LITE для ioBroker на Linux. Один бризе�
 HCI/Noble; работа на физическом бризере пока не подтверждена. Только BR_LITE: общий UUID
 с другими Tion не означает совместимость команд. OTA и сброс фильтра не реализованы.
 
-## USB Bluetooth и Linux-контейнер
+## Способ взаимодействия: как в ioBroker.ble
 
-Адаптер использует выделенный USB Bluetooth-донгл как Linux-контроллер `hci0` или
-`hci1`. Backend — `@stoprocent/noble`, native HCI, exclusive user channel.
-Сервис bluetoothd и системный D-Bus для обмена не используются. Сокет `/run/dbus`
-из предыдущей версии можно убрать из конфигурации контейнера.
+Проанализирован [ioBroker.ble](https://github.com/AlCalzone/ioBroker.ble/tree/f0dd1214a8482b2d60cbf48f642e2add12ece177),
+версия 0.14.1, commit `f0dd1214a8482b2d60cbf48f642e2add12ece177`:
 
-Linux-драйвер `btusb` должен распознать донгл. Устройства HCI принадлежат общему ядру
-хоста: одного `devices: /dev/bus/usb/...` в Docker недостаточно. Для выбранного
-native backend контейнеру нужны `network_mode: host`, `NET_ADMIN` и `NET_RAW`.
-Это режим с контроллером, доступным через HCI, а не libusb-доступ к USB endpoints.
+- [scanProcess.ts](https://github.com/AlCalzone/ioBroker.ble/blob/f0dd1214a8482b2d60cbf48f642e2add12ece177/src/scanProcess.ts)
+  загружает `@stoprocent/noble` после установки `NOBLE_HCI_DEVICE_ID`; поддерживает
+  singleton и старый factory export с `{ extended: false }`.
+- [main.ts](https://github.com/AlCalzone/ioBroker.ble/blob/f0dd1214a8482b2d60cbf48f642e2add12ece177/src/main.ts)
+  запускает сканер через `child_process.fork()` и получает события через IPC.
+- Native Bluetooth изолирован от процесса адаптера. В нашем драйвере при падении
+  worker закрывается сессия, отменяются текущие команды и применяется существующий
+  reconnect с задержкой. Старые команды после рестарта не повторяются.
+
+Тот же подход реализован для BR_LITE: стандартный Linux HCI **RAW** backend Noble,
+без `userChannel:true`. В worker входят scan, connect, GATT discovery, notifications
+и ATT write. Parent содержит codec, очередь BR_LITE и ioBroker states. Сам ioBroker.ble
+обрабатывает advertisements и пока не реализует GATT управление; поэтому его TCP
+server для beacon scanning нельзя напрямую использовать для команд бризеру.
+
+Зависимость `@stoprocent/noble` сохранена в версии ^2.8.0 текущего каркаса; подход
+загрузки совместим с singleton/factory API. Обязательная dependency на
+`@stoprocent/bluetooth-hci-socket` обеспечивает установку Linux HCI backend.
+
+## Linux-контейнер
+
+Нужен Bluetooth-контроллер, зарегистрированный ядром хоста как `hci0`, `hci1` и т.д.
+D-Bus сокет не используется. В отличие от версии 0.0.2 с exclusive user channel,
+контроллер перед запуском должен быть **up**, а не down.
 
 ### Подготовка хоста
 
-Найдите именно USB-контроллер, который выделяете адаптеру:
-
 ```sh
-lsusb
 hciconfig -a
-readlink -f /sys/class/bluetooth/hci1/device
+# Подставьте фактический контроллер.
+sudo hciconfig hci0 up
+rfkill list bluetooth
 ```
 
-Замените `hci1` в командах и настройках на фактический номер. Для exclusive user
-channel контроллер должен быть **down** до старта ioBroker:
-
-```sh
-sudo hciconfig hci1 down
-```
-
-Не используйте этот донгл одновременно из BlueZ, другого BLE-адаптера или другого
-экземпляра tion_lite. Если Bluetooth-хост обслуживает только этот донгл, можно
-остановить `bluetooth.service`; при наличии других Bluetooth-устройств не выключайте
-весь сервис, но обеспечьте, чтобы он не включал выделенный контроллер обратно.
-Не выгружайте `btusb`: native HCI backend требует зарегистрированный `hciX`.
+Linux-драйвер должен распознавать USB-донгл (`btusb` для обычных устройств).
+Не выгружайте `btusb`. Не запускайте параллельно другой сканер/клиент на том же HCI:
+команды сканирования и соединений могут конфликтовать даже при RAW access.
+Выделенный донгл удобен, но монопольный user channel больше не требуется.
 
 ### Docker Compose
 
-Изменения в существующем сервисе ioBroker (пример USB-пути из `lsusb`):
+Добавьте в существующий сервис ioBroker:
 
 ```yaml
 services:
   iobroker:
-    # Сохраните текущие image и том данных ioBroker.
+    # Сохраните текущие image и volumes.
     network_mode: host
     cap_add:
-      - NET_ADMIN
       - NET_RAW
-    devices:
-      - /dev/bus/usb/001/004:/dev/bus/usb/001/004
 ```
 
-Путь `/dev/bus/usb/001/004` — пример; подставьте свой. USB mapping отражает выбранный
-проброшенный донгл, но native HCI backend обращается к нему через HCI-сокеты ядра.
-При переподключении USB адрес `/dev/bus/usb/...` и номер `hciX` могут измениться:
-проверьте Compose и настройку экземпляра заново. При host networking секция `ports`
-не используется; порты ioBroker становятся портами хоста. Пересоздайте контейнер.
+Прямой HCI использует ядро Linux, поэтому одного проброса `/dev/bus/usb/...` недостаточно.
+Для этого RAW backend не нужен libusb USB mapping. При host networking секция `ports`
+не используется, порты ioBroker становятся портами хоста. Пересоздайте контейнер.
 
-Права нужны **процессу Node.js**, который запускает ioBroker. `cap_add` само по себе
-не гарантирует capabilities у непривилегированного пользователя внутри образа.
-Если ioBroker работает не от root, задайте file capabilities реальному Node binary
-внутри контейнера с помощью `libcap2-bin`:
+Право создавать raw socket нужно фактическому процессу Node.js. Если он работает
+от непривилегированного пользователя, `cap_add` может быть недостаточно после
+снижения привилегий в entrypoint. Как описано в ioBroker.ble, задайте file capability
+реальному Node binary **внутри контейнера**, от root:
 
 ```sh
-# Выполнить внутри контейнера от root.
-setcap cap_net_raw,cap_net_admin+eip "$(readlink -f "$(command -v node)")"
+setcap cap_net_raw+eip "$(readlink -f "$(command -v node)")"
 getcap "$(readlink -f "$(command -v node)")"
 ```
 
-После замены Node.js/образа повторите настройку. `no-new-privileges` или rootless
-Docker могут не дать получить эти capabilities: используйте среду, которая
-разрешает HCI user channel. Запуск адаптера в отдельном процессе обязателен;
-`compact` отключён в metadata.
+Для `setcap/getcap` нужен `libcap2-bin`. После замены Node.js/образа настройку нужно
+повторить. Rootless Docker и `no-new-privileges` могут препятствовать получению
+capability. `privileged:true` не является обязательной настройкой этого драйвера.
+`NOBLE_HCI_DEVICE_ID` задаётся worker из параметра `hci`; глобально задавать его не
+нужно. `HCI_CHANNEL_USER` удаляется из окружения worker, чтобы остаться в RAW режиме.
 
-Включите режим подключения на самом бризере согласно его инструкции и задайте MAC
-в Admin. Native HCI backend не использует сохранённые bonding-ключи BlueZ и не
-реализует отдельное управление pairing. Если устройство требует BLE pairing с
-шифрованием, совместимость этого режима требует проверки на устройстве.
-
-Описание [HCI user channel и Docker в Noble](https://github.com/stoprocent/noble#choosing-a-linux-bluetooth-access-mode).
+Включите режим подключения на бризере согласно его инструкции и задайте MAC в Admin.
+Noble HCI не использует bonding-ключи BlueZ. Для устройства, требующего BLE encryption,
+потребуется отдельно проверить pairing; этот драйвер его автоматически не выполняет.
 
 ## Сборка и установка
 
@@ -115,11 +117,11 @@ make, g++, libbluetooth-dev и libudev-dev. Не используйте `--ignor
 установке на целевой машине.
 Сборка включает dev dependencies; не используйте `--omit=dev` до сборки.
 
-Полученный архив `iobroker.tion_lite-0.0.2.tgz` перенесите в контейнер. Из каталога
+Полученный архив `iobroker.tion_lite-0.0.3.tgz` перенесите в контейнер. Из каталога
 установки ioBroker (обычно `/opt/iobroker`) установите локальный архив:
 
 ```sh
-npm install /tmp/iobroker.tion_lite-0.0.2.tgz --omit=dev
+npm install /tmp/iobroker.tion_lite-0.0.3.tgz --omit=dev
 iobroker add tion_lite
 ```
 
@@ -146,6 +148,7 @@ iobroker add tion_lite
 
 | State | Тип / доступ | Значение |
 |---|---|---|
+| info.driverState | string / R | Noble state: unknown, poweredOn, poweredOff, unauthorized, unsupported, disconnected |
 | info.connection | boolean / R | Устройство подключено, информация и состояние прочитаны |
 | info.address / info.name / info.model | string / R | Адрес, имя и настроенная модель BR_LITE |
 | info.firmwareVersion | number / R | Сырые 16 бит версии прошивки |
@@ -183,11 +186,14 @@ iobroker add tion_lite
 - `info.connection=false`: проверьте address/hci, режим подключения бризера,
   доступ к HCI в контейнере и `diagnostics.lastError`.
 - `unsupported`/`unauthorized`: проверьте `network_mode: host`, capabilities Node.js,
-  наличие выбранного `hciX` и состояние **down** до запуска адаптера.
+  наличие выбранного `hciX` и состояние **up** до запуска адаптера; см. `info.driverState`.
+- `EAFNOSUPPORT`: контейнер должен использовать `network_mode: host`.
+- `Bluetooth worker exited`: native процесс упал; диагностика в `lastError`, worker
+  будет создан заново с новой сессией, основной ioBroker продолжает работу.
 - Ошибка native addon: установите зависимости на целевой Linux/архитектуре;
   не переносите node_modules с macOS или другой архитектуры.
 - `HCI operation timed out`: проверьте USB-донгл, radio/rfkill, MAC и отсутствие
-  другого процесса, который занял контроллер. Нужен выделенный донгл.
+  другого процесса, который одновременно управляет контроллером.
 - `Response timeout`: устройство занято другим клиентом, ошибочная модель, слабый
   сигнал либо неподтверждённая особенность протокола.
 - `Discarded BLE packet` при debug: неверные фрагменты, длина или CRC; нужен захват
@@ -198,11 +204,14 @@ iobroker add tion_lite
 ## Разработка
 
 - `src/lib/protocol.ts`: команды, CRC, фрагментация и парсеры.
-- `src/lib/hci.ts`: прямой HCI backend Noble, scan/connect/notifications.
+- `src/lib/hci.ts`: Noble HCI RAW, scan/connect/notifications; загружается только worker.
+- `src/hciWorker.ts`: дочерний процесс и последовательный обработчик GATT операций.
+- `src/lib/workerTransport.ts`: parent proxy, IPC, таймауты и остановка worker.
+- `src/lib/hciIpc.ts`: проверяемые типы сообщений IPC.
 - `src/lib/transport.ts`: общий контракт BLE транспорта.
 - `src/lib/session.ts`: очередь, таймауты и readback.
 - `src/main.ts`: конфигурация, states и reconnect.
-- `npm run test:ts`: тесты codec, сессии и имитации HCI/Noble.
+- `npm run test:ts`: codec, сессия, HCI/Noble, загрузка backend, IPC и падение worker.
 - `npm run test:package`: проверки структуры пакета ioBroker.
 - `npm run lint`, `npm run check`, `npm run build`: статические проверки и сборка.
 
@@ -210,6 +219,10 @@ API транспорта: [Noble](https://github.com/stoprocent/noble),
 [native HCI socket](https://github.com/stoprocent/node-bluetooth-hci-socket).
 
 ## Changelog
+
+### 0.0.3
+
+* (DimiDr0l) Use ioBroker.ble-style Noble loading, standard HCI RAW access and an isolated Bluetooth worker with IPC and driver-state diagnostics.
 
 ### 0.0.2
 

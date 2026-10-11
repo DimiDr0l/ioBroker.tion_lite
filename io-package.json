@@ -1,8 +1,12 @@
 {
     "common": {
         "name": "tion_lite",
-        "version": "0.0.2",
+        "version": "0.0.3",
         "news": {
+            "0.0.3": {
+                "en": "Use Noble HCI RAW in an isolated worker like ioBroker.ble",
+                "ru": "Noble HCI RAW в отдельном процессе по подходу ioBroker.ble"
+            },
             "0.0.2": {
                 "en": "Use direct USB Bluetooth HCI access in Linux containers",
                 "ru": "Прямой доступ к USB Bluetooth через HCI в Linux-контейнере"

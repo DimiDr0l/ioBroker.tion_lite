@@ -28,24 +28,34 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 var hci_exports = {};
 __export(hci_exports, {
-  HciTransport: () => HciTransport
+  HciTransport: () => HciTransport,
+  loadNoble: () => loadNoble
 });
 module.exports = __toCommonJS(hci_exports);
 var import_protocol = require("./protocol");
 const uuid = (value) => value.replace(/-/g, "").toLowerCase();
+async function loadNoble(deviceId, importer = () => Promise.resolve().then(() => __toESM(require("@stoprocent/noble")))) {
+  process.env.NOBLE_HCI_DEVICE_ID = String(deviceId);
+  process.env.NOBLE_BINDINGS = "hci";
+  delete process.env.HCI_CHANNEL_USER;
+  const module2 = await importer();
+  const exported = module2 && typeof module2 === "object" && "default" in module2 ? module2.default : module2;
+  const noble = typeof exported === "function" ? exported({ extended: false }) : exported;
+  if (!noble || typeof noble.on !== "function") {
+    throw new Error("Unable to load @stoprocent/noble: expected a Noble instance or factory");
+  }
+  return noble;
+}
 class HciTransport {
   /**
-   * Configure one native HCI user-channel backend, separate from BlueZ.
+   * Configure the standard Noble HCI backend, as used by ioBroker.ble.
    *
    * @param address Uppercase colon-separated breezer MAC address.
    * @param hci Dedicated controller name, such as hci1.
    * @param createNoble Backend factory, injectable in tests.
    * @param operationTimeout Deadline for scan/connect/discovery, in milliseconds.
    */
-  constructor(address, hci, createNoble = async (deviceId) => {
-    const { withBindings } = await Promise.resolve().then(() => __toESM(require("@stoprocent/noble")));
-    return withBindings("hci", { hciDriver: "native", deviceId, userChannel: true });
-  }, operationTimeout = 2e4) {
+  constructor(address, hci, createNoble = loadNoble, operationTimeout = 2e4) {
     this.address = address;
     this.hci = hci;
     this.createNoble = createNoble;
@@ -54,6 +64,8 @@ class HciTransport {
   onData = () => {
   };
   onDisconnect = () => {
+  };
+  onDriverState = () => {
   };
   noble;
   peripheral;
@@ -68,6 +80,7 @@ class HciTransport {
     }
   };
   handleState = (state) => {
+    this.onDriverState(state);
     if (this.connected && state !== "poweredOn") {
       this.handleError(new Error(`Bluetooth controller became ${state}`));
     }
@@ -104,13 +117,14 @@ class HciTransport {
     }
   }
   async waitForController(noble) {
+    this.onDriverState(noble.state);
     if (noble.state === "poweredOn") {
       return;
     }
     const check = (state) => {
       if (["unsupported", "unauthorized"].includes(state)) {
         throw new Error(
-          `${this.hci} is ${state}; check HCI access permissions and that the dedicated controller is down`
+          `${this.hci} is ${state}; check HCI access permissions and that the selected controller is powered on`
         );
       }
     };
@@ -119,6 +133,7 @@ class HciTransport {
     };
     const ready = new Promise((resolve, reject) => {
       listener = (state) => {
+        this.onDriverState(state);
         try {
           check(state);
           if (state === "poweredOn") {
@@ -165,7 +180,7 @@ class HciTransport {
   /** Scan for the configured MAC, connect, resolve GATT and enable notifications. */
   async connect() {
     if (process.platform !== "linux") {
-      throw new Error("Direct HCI transport requires Linux");
+      throw new Error("Noble HCI transport requires Linux");
     }
     if (!/^hci\d+$/.test(this.hci)) {
       throw new Error("Expected an HCI controller name such as hci0");
@@ -220,7 +235,7 @@ class HciTransport {
     }
     await this.bounded(() => this.writer.writeAsync(frame, !withResponse));
   }
-  /** Release listeners, connections and the exclusive HCI socket. */
+  /** Release listeners, connections and the HCI RAW socket. */
   close() {
     var _a, _b, _c, _d, _e;
     if (this.abort.signal.aborted) {
@@ -243,6 +258,7 @@ class HciTransport {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  HciTransport
+  HciTransport,
+  loadNoble
 });
 //# sourceMappingURL=hci.js.map
