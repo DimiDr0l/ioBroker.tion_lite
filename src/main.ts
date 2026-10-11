@@ -1,6 +1,6 @@
 import * as utils from "@iobroker/adapter-core";
 import { errorText } from "./lib/transport";
-import { HciTransport } from "./lib/hci";
+import { WorkerTransport } from "./lib/workerTransport";
 import { LiteSession } from "./lib/session";
 import { type Controls, type LiteState, validateControls } from "./lib/protocol";
 
@@ -30,6 +30,10 @@ class TionLite extends utils.Adapter {
             await this.setObjectNotExistsAsync(id, { type: "channel", common: { name: id }, native: {} });
         }
         const definitions: [string, ioBroker.StateCommon][] = [
+            [
+                "info.driverState",
+                { name: "Noble controller state", type: "string", role: "text", read: true, write: false },
+            ],
             [
                 "info.connection",
                 { name: "Device ready", type: "boolean", role: "indicator.connected", read: true, write: false },
@@ -114,6 +118,7 @@ class TionLite extends utils.Adapter {
         this.config.maxTemperature = Number(this.config.maxTemperature ?? 25);
         await this.createStates();
         await this.setStateAsync("info.connection", false, true);
+        await this.setStateAsync("info.driverState", "unknown", true);
         await this.setStateAsync("diagnostics.commandStatus", "idle", true);
         if (
             !/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(this.config.address ?? "") ||
@@ -165,8 +170,9 @@ class TionLite extends utils.Adapter {
         if (this.stopping || this.session) {
             return;
         }
+        const transport = new WorkerTransport(this.config.address, this.config.hci);
         const session = new LiteSession(
-            new HciTransport(this.config.address, this.config.hci),
+            transport,
             {
                 state: state => {
                     if (this.session === session) {
@@ -188,6 +194,13 @@ class TionLite extends utils.Adapter {
             },
             this.config.responseTimeout,
         );
+        transport.onDriverState = state => {
+            if (this.session === session) {
+                void this.setStateAsync("info.driverState", state, true).catch(error =>
+                    this.log.error(errorText(error)),
+                );
+            }
+        };
         this.session = session;
         try {
             const identity = await session.initialize();

@@ -4,6 +4,8 @@ export interface Transport {
     onData: (data: Buffer) => void;
     /** Reports a lost connection or controller failure. */
     onDisconnect: (reason: Error) => void;
+    /** Reports Noble controller states such as poweredOn or unauthorized. */
+    onDriverState?: (state: string) => void;
     /** Resolve GATT and subscribe before returning the device identity. */
     connect(): Promise<{
         /** Advertised or cached Bluetooth name. */

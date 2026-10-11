@@ -23,7 +23,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 ));
 var utils = __toESM(require("@iobroker/adapter-core"));
 var import_transport = require("./lib/transport");
-var import_hci = require("./lib/hci");
+var import_workerTransport = require("./lib/workerTransport");
 var import_session = require("./lib/session");
 var import_protocol = require("./lib/protocol");
 class TionLite extends utils.Adapter {
@@ -50,6 +50,10 @@ class TionLite extends utils.Adapter {
       await this.setObjectNotExistsAsync(id, { type: "channel", common: { name: id }, native: {} });
     }
     const definitions = [
+      [
+        "info.driverState",
+        { name: "Noble controller state", type: "string", role: "text", read: true, write: false }
+      ],
       [
         "info.connection",
         { name: "Device ready", type: "boolean", role: "indicator.connected", read: true, write: false }
@@ -133,6 +137,7 @@ class TionLite extends utils.Adapter {
     this.config.maxTemperature = Number((_a = this.config.maxTemperature) != null ? _a : 25);
     await this.createStates();
     await this.setStateAsync("info.connection", false, true);
+    await this.setStateAsync("info.driverState", "unknown", true);
     await this.setStateAsync("diagnostics.commandStatus", "idle", true);
     if (!/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test((_b = this.config.address) != null ? _b : "") || !/^hci\d+$/.test((_c = this.config.hci) != null ? _c : "") || !Number.isInteger(this.config.pollInterval) || this.config.pollInterval < 5 || this.config.pollInterval > 3600 || !Number.isInteger(this.config.responseTimeout) || this.config.responseTimeout < 1e3 || this.config.responseTimeout > 1e4 || ![25, 30].includes(this.config.maxTemperature)) {
       await this.reportError(
@@ -171,8 +176,9 @@ class TionLite extends utils.Adapter {
     if (this.stopping || this.session) {
       return;
     }
+    const transport = new import_workerTransport.WorkerTransport(this.config.address, this.config.hci);
     const session = new import_session.LiteSession(
-      new import_hci.HciTransport(this.config.address, this.config.hci),
+      transport,
       {
         state: (state) => {
           if (this.session === session) {
@@ -194,6 +200,13 @@ class TionLite extends utils.Adapter {
       },
       this.config.responseTimeout
     );
+    transport.onDriverState = (state) => {
+      if (this.session === session) {
+        void this.setStateAsync("info.driverState", state, true).catch(
+          (error) => this.log.error((0, import_transport.errorText)(error))
+        );
+      }
+    };
     this.session = session;
     try {
       const identity = await session.initialize();
